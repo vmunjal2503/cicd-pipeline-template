@@ -1,0 +1,108 @@
+name: CD — Deploy to Production
+
+# Manual trigger only — requires explicit approval
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Docker image tag to deploy (default: latest)"
+        required: false
+        default: "latest"
+      confirm:
+        description: "Type 'deploy-production' to confirm"
+        required: true
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+  ECS_CLUSTER: ${{ secrets.ECS_CLUSTER_PRODUCTION }}
+  ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
+
+jobs:
+  # ──────────────── Validation Gate ────────────────
+  validate:
+    name: Validate Deployment
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm deployment intent
+        if: github.event.inputs.confirm != 'deploy-production'
+        run: |
+          echo "❌ Deployment not confirmed. Type 'deploy-production' to proceed."
+          exit 1
+
+  # ──────────────── Deploy ────────────────
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [validate]
+    environment: production  # Requires environment approval in GitHub settings
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get current task definition (for rollback)
+        id: current
+        run: |
+          CURRENT_TASK=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }} \
+            --query 'services[0].taskDefinition' \
+            --output text)
+          echo "task_definition=$CURRENT_TASK" >> $GITHUB_OUTPUT
+          echo "Current task definition: $CURRENT_TASK"
+
+      - name: Deploy to ECS Production
+        id: deploy
+        run: |
+          chmod +x scripts/deploy-ecs.sh
+          ./scripts/deploy-ecs.sh production ${{ github.event.inputs.image_tag }}
+
+      - name: Wait for deployment to stabilize
+        run: |
+          echo "Waiting for ECS service to stabilize..."
+          aws ecs wait services-stable \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }}
+
+      - name: Run smoke tests
+        id: smoke
+        run: |
+          chmod +x scripts/smoke-test.sh
+          ./scripts/smoke-test.sh production
+
+      # ──────────────── Auto-Rollback on Failure ────────────────
+      - name: Rollback on failure
+        if: failure() && steps.deploy.outcome == 'success'
+        run: |
+          echo "⚠️ Deployment failed — rolling back to previous version..."
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service ${{ env.ECS_SERVICE }} \
+            --task-definition ${{ steps.current.outputs.task_definition }} \
+            --force-new-deployment
+          aws ecs wait services-stable \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }}
+          echo "✅ Rollback complete."
+
+      # ──────────────── Notify ────────────────
+      - name: Notify Slack — Success
+        if: success()
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data '{"text":"🚀 *Production deploy successful*\nImage: `${{ github.event.inputs.image_tag }}`\nBy: ${{ github.actor }}"}' \
+            ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Notify Slack — Failure
+        if: failure()
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data '{"text":"🔥 *Production deploy FAILED — auto-rollback triggered*\nImage: `${{ github.event.inputs.image_tag }}`\nBy: ${{ github.actor }}\nCheck: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}' \
+            ${{ secrets.SLACK_WEBHOOK_URL }}

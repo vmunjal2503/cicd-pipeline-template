@@ -1,0 +1,47 @@
+name: PR Checks — Quality Gate
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality-gate:
+    name: Code Quality & Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('requirements*.txt') }}
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install flake8 black mypy pytest pytest-cov
+
+      # ──────────────── Linting ────────────────
+      - name: Flake8
+        run: flake8 . --max-line-length=120 --exclude=venv,.git
+
+      - name: Black (format check)
+        run: black --check --line-length=120 .
+
+      # ──────────────── Type Checking ────────────────
+      - name: Mypy
+        run: mypy . --ignore-missing-imports || true
+
+      # ──────────────── Tests + Coverage Gate ────────────────
+      - name: Run tests with coverage
+        run: pytest --cov=. --cov-report=term-missing --cov-fail-under=80 -v
+
+      # ──────────────── Docker Build Test ────────────────
+      - name: Verify Docker build
+        run: docker build -t pr-test:${{ github.sha }} .
