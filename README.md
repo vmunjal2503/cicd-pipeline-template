@@ -2,6 +2,14 @@
 
 Production-ready CI/CD pipelines for deploying to AWS (EC2, ECS, S3). Copy, customize, deploy.
 
+## Why I Built This
+
+**The Problem:** Most teams either deploy manually (SSH into server, `git pull`, pray nothing breaks) or spend weeks building a custom CI/CD pipeline from scratch. Manual deployments cause downtime, missed bugs, and "it works on my machine" issues. Custom pipelines become unmaintainable spaghetti YAML that nobody understands.
+
+**The Solution:** Copy these battle-tested GitHub Actions workflows into your repo and get a complete deployment pipeline in 30 minutes — not weeks. It covers the full lifecycle: lint → test → build Docker → security scan → deploy to staging (automatic) → deploy to production (manual approval) → auto-rollback if health checks fail.
+
+**Built from production experience** at Zscaler where I've designed CI/CD pipelines that deploy hundreds of times per day with zero-downtime releases. These templates distill those patterns into something any team can use.
+
 ```
   ┌─────────┐    ┌──────┐    ┌──────┐    ┌───────┐    ┌─────────┐    ┌──────────┐
   │  Push /  │───▶│ Lint │───▶│ Test │───▶│ Build │───▶│ Deploy  │───▶│  Deploy   │
