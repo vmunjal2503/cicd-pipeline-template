@@ -67,4 +67,4 @@ make deploy-prod    # Deploy to production via ECS
 
 ---
 
-Built by **[Difiboffins Technologies](https://digiboffins.com)** | Open source under MIT License
+Built by **Vikas Munjal** | Open source under MIT License
